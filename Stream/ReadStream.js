@@ -12,7 +12,7 @@ class ReadStream extends EventEmitter {
     this.end = options.end;
     this.autoClose = options.autoClose || true;
     this.highWaterMark = options.highWaterMark || 64 * 1024;// 默认64K
-    this.encoding = options.encoding || null;
+    this.encoding = options.encoding || 'utf8';
     this.pos = this.start; // 每次读取的位置，默认等于开始的位置
 
     // 默认是非流动模式 rs.pause rs.resume
@@ -46,11 +46,15 @@ class ReadStream extends EventEmitter {
       : this.highWaterMark;
     const buffer = Buffer.alloc(howMuchToRead); // 每次的Buffer
     fs.read(this.fd, buffer, 0, buffer.length, this.pos, (err, bytesRead) => {
-      if (bytesRead > 0) { // 如果能读取到内容，而且flowing为true就继续读取
+      if (err) {
+        return;
+      }
+      if (bytesRead) { // 如果能读取到内容，而且flowing为true就继续读取
         this.pos += bytesRead; // 维护每次读取的位置
+        const data = buffer.slice(0, bytesRead);
         this.emit('data', this.encoding // 判断是否有外部传入的编码方式，如果有则使用改编码方式字符输出，没有则输出buffer
-          ? buffer.toString(this.encoding)
-          : buffer
+          ? data.toString(this.encoding)
+          : data
         ); // 将结果发射出去
         if (this.flowing) {
           this.read();
@@ -68,13 +72,32 @@ class ReadStream extends EventEmitter {
   }
   open() {
     fs.open(this.path, this.flag, (err, fd) => {
-
       if (err) {
         this.emit('error');
         return;
       }
       this.fd = fd; // 代表当前文件的描述符 number类型，fs.read()方法还会用到这个参数
       this.emit('open', this.fd);
+    })
+  }
+  pause() {
+    this.flowing = false;
+  }
+  resume() {
+    this.flowing = true;
+    this.read(); // 继续读
+  }
+
+  pipe(ws) {
+    this.on('data', (chunk) => {
+      let flag = ws.write(chunk);
+      if (!flag) {
+        this.pause();
+      }
+    })
+
+    ws.on('drain', () => {
+      this.resume()
     })
   }
 }

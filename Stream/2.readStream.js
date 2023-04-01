@@ -1,12 +1,13 @@
 let fs = require('fs');
 let ReadStream = require('./ReadStream')
 console.log('my')
+
 let rs = new ReadStream('./name.txt', {
   flag: 'r',
-  highWaterMark: 3,
+  highWaterMark: 4,
   mode: 0o666,
-  start: 0,
-  end: 6,
+  // start: 0,
+  // end: 6,
   encoding: 'utf8',
   autoClose: true,
 });

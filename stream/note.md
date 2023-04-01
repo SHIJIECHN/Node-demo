@@ -455,6 +455,13 @@ class ReadStream extends EventEmitter {
       this.emit('open', this.fd);
     })
   }
+  pause() {
+    this.flowing = false;
+  }
+  resume() {
+    this.flowing = true;
+    this.read(); // 继续读
+  }
 }
 
 module.exports = ReadStream;
@@ -555,3 +562,377 @@ ws.on('drain', () => {
  */
 
 ```
+
+## 实现可写流
+
+```javascript
+const fs = require('fs');
+const WriteStream = require('./WriteStream.js')
+
+const ws = new WriteStream('./name.txt', {
+  falg: 'w',
+  mode: 0o666,
+  autoClose: true,
+  encoding: 'utf8',
+  highWaterMark: 4, // highWaterMark预期使用的内存，默认16*1024
+})
+
+
+let i = 9; // 每次都耗两个字节内存
+function write() { // 预计2个
+  let flag = true;
+  while (i && flag) {
+    flag = ws.write(i-- + ''); 
+  }
+}
+write();
+ws.on('drain', () => {
+  write()
+})
+```
+
+```js
+/**
+ * 第一次向文件中写入，第二次把内容放到缓存中
+ * 第一次写入成功后，清空缓存第一项，缓存第一项清空后，再清空第二个
+ * 都清空后再看是够触发了drain事件，是的话重新执行
+ */
+const fs = require('fs');
+const Events = require('events');
+class WriteStream extends Events {
+  constructor(path, options) {
+    super();
+    this.path = path;
+    this.flag = options.flag || 'w';
+    this.mode = options.mode || 0o666;
+    this.autoClose = options.autoClose || true;
+    this.encoding = options.encoding || 'utf8';
+    this.highWaterMark = options.highWaterMark || 16 * 1024;
+    this.start = options.start || 0;
+    this.fd = null;
+
+    this.cache = [];// 缓存多次写入的数据。源码使用链表
+    this.len = 0; // 维护写入的长度 len
+    this.needDrain = false; // 是否触发drain事件
+    this.writing = false; // 如果正在写入就放入缓存中
+    this.pos = this.start; // 写入非位置
+
+    this.open()
+  }
+  open() {
+    fs.open(this.path, this.flag, (err, fd) => {
+      if (err) {
+        return this.emit('error');
+      }
+      this.fd = fd;
+      this.emit('open');
+    })
+  }
+
+  write(chunk, encoding = this.encoding, callback = () => { }) {
+    // 第一次是真正的向文件中写入，之后都放在内存中了
+    // 判断是不是buffer，如果不是buffer就需要转成buffer，在重新赋值。把传入的内容统一转换成buffer
+    chunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    this.len += chunk.length; // 修改长度
+    if (this.len >= this.highWaterMark) { // 清空后需要触发drain事件
+      this.needDrain = true;
+    }
+
+    // write方法要有一个返回结果
+    if (this.writing) {
+      this.cache.push({ // 把当前写的存入缓存区
+        chunk, // 内容
+        encoding, // 编码
+        callback
+      })
+      // 第一次写完怎么知道写第二个？
+    } else {
+      // 如果没有写入，则把状态修改为正在写入，并开始写
+      this.writing = true; // 正在写入
+      this._write(chunk, encoding, () => {
+        callback(); // 回调
+        this.clearBuffer(); // 清理数组的第一项
+      }); // 开始写入
+    }
+    return !this.needDrain; // this.len < this.highWaterMark
+  }
+  clearBuffer() {
+    let obj = this.cache.shift();
+    if (obj) {
+      this._write(obj.chunk, obj.encoding, () => {
+        // 当自己写入成功后，继续清空缓存，直到缓存区为空
+        obj.callback();
+        this.clearBuffer();
+      })
+    } else { // 缓存已经干了
+      if (this.needDrain) { // 需要触发drain
+        this.needDrain = false;
+        this.writing = false; // 不是正在写入，下次写入时，依然是第一个往文件里写，剩下的向缓存中写入
+        this.emit('drain')
+      }
+    }
+  }
+
+  _write(chunk, encoding, callback) {
+    if (typeof this.fd !== 'number') {
+      return this.once('open', () => this._write(chunk, encoding, callback));
+    }
+    // 写入时可以不用加pos
+    fs.write(this.fd, chunk, 0, chunk.length, this.pos, (err, written) => {
+      this.pos += written;
+      this.len -= written; // 每次写入成功后，都需要把缓存的大小减少
+      callback();// 当写入成功后，调用callback，会执行clearBuffer方法
+    })
+  }
+
+}
+module.exports = WriteStream
+```
+
+## pipe实现
+:::: tabs
+::: tab copy.js
+```javascript
+let fs = require('fs');
+// let rs = fs.createReadStream('./name.txt', { highWaterMark: 4 });
+// let ws = fs.createWriteStream('./name1.txt', { highWaterMark: 1 });
+let ReadStream = require('./ReadStream.js');
+let WriteStream = require('./WriteStream.js');
+
+let rs = new ReadStream('./name.txt', { highWaterMark: 4 });
+let ws = new WriteStream('./name1.txt', { highWaterMark: 1 });
+
+// 读文件。先读64k，我就拿着64K去写，超过16K 就别读了，等我把64K写入完毕后，你再去读取
+// rs.on('data', function (chunk) {
+//   console.log(chunk);
+//   let flag = ws.write(chunk); // 写入文件，写满之后，暂停不要读取了
+//   console.log(flag)
+//   if (!flag) { // 内存读满了，highWaterMark为1，
+//     rs.pause(); // 暂停
+//   }
+// })
+
+// // 写完成后
+// ws.on('drain', () => {
+//   console.log('执行drain')
+//   rs.resume();// 恢复继续读
+// })
+
+rs.pipe(ws); // 通过pipe可以实现拷贝
+```
+:::   
+::: tab ReadStream.js
+```javascript
+const fs = require('fs');
+const EventEmitter = require('events');
+// 实例可以使用on方法，说明继承至EventEmitter
+class ReadStream extends EventEmitter {
+  constructor(path, options = {}) {
+    super();
+    // 参数处理
+    this.path = path;
+    this.flag = options.flag || 'r';
+    this.mode = options.mode || 438;
+    this.start = options.start || 0;
+    this.end = options.end;
+    this.autoClose = options.autoClose || true;
+    this.highWaterMark = options.highWaterMark || 64 * 1024;// 默认64K
+    this.encoding = options.encoding || 'utf8';
+    this.pos = this.start; // 每次读取的位置，默认等于开始的位置
+
+    // 默认是非流动模式 rs.pause rs.resume
+    this.flowing = null; // 开始读取的时候，需要把这个值改成true
+
+    // 要读取文件 需要打开文件夹。实例化的时候就执行一次open，不管有没有监听data
+    this.open();
+
+    // events事件：on，emit，once，newListener。当调用on方法时，就会触发newListener，并将事件名传给newListener
+
+    this.on('newListener', (type) => {
+      // console.log(type);
+      // 用户监听了data事件
+      if (type === 'data') {
+        this.flowing = true; // 开始读取
+        this.read();
+      }
+    })
+
+  }
+  read() {
+    // 默认第一次read方法，肯定拿不到fd的，但是等一会如果触发了open事件，肯定可以获得this.fd
+
+    if (typeof this.fd !== 'number') { // 没有this.fd 。保证文件描述符存在的时候，才调用read方法来读取
+      return this.once('open', () => this.read()) // 把open事件存起来，当open事件触发的时候，就会执行
+    }
+    // highWaterMark每次读取的个数。
+    // 默认如果没有end，每次读取highWaterMark。如果有end，就需要end来算最后一次熬读取多少
+    let howMuchToRead = this.end
+      ? Math.min((this.end - this.pos + 1), this.highWaterMark)
+      : this.highWaterMark;
+    const buffer = Buffer.alloc(howMuchToRead); // 每次的Buffer
+    fs.read(this.fd, buffer, 0, buffer.length, this.pos, (err, bytesRead) => {
+      if (err) {
+        return;
+      }
+      if (bytesRead) { // 如果能读取到内容，而且flowing为true就继续读取
+        this.pos += bytesRead; // 维护每次读取的位置
+        const data = buffer.slice(0, bytesRead);
+        this.emit('data', this.encoding // 判断是否有外部传入的编码方式，如果有则使用改编码方式字符输出，没有则输出buffer
+          ? data.toString(this.encoding)
+          : data
+        ); // 将结果发射出去
+        if (this.flowing) {
+          this.read();
+        }
+      } else {
+        this.emit('end');
+        if (this.autoClose) {
+          fs.close(this.fd, () => {
+            this.emit('close');
+            this.flowing = null;
+          })
+        }
+      }
+    });
+  }
+  open() {
+    fs.open(this.path, this.flag, (err, fd) => {
+      if (err) {
+        this.emit('error');
+        return;
+      }
+      this.fd = fd; // 代表当前文件的描述符 number类型，fs.read()方法还会用到这个参数
+      this.emit('open', this.fd);
+    })
+  }
+  pause() {
+    this.flowing = false;
+  }
+  resume() {
+    this.flowing = true;
+    this.read(); // 继续读
+  }
+
+  pipe(ws) {
+    this.on('data', (chunk) => {
+      let flag = ws.write(chunk);
+      if (!flag) {
+        this.pause();
+      }
+    })
+
+    ws.on('drain', () => {
+      this.resume()
+    })
+  }
+}
+
+module.exports = ReadStream;
+```
+:::   
+::: tab WriteStream.js
+```javascript
+/**
+ * 第一次向文件中写入，第二次把内容放到缓存中
+ * 第一次写入成功后，清空缓存第一项，缓存第一项清空后，再清空第二个
+ * 都清空后再看是够触发了drain事件，是的话重新执行
+ */
+const fs = require('fs');
+const Events = require('events');
+class WriteStream extends Events {
+  constructor(path, options) {
+    super();
+    this.path = path;
+    this.flag = options.flag || 'w';
+    this.mode = options.mode || 0o666;
+    this.autoClose = options.autoClose || true;
+    this.encoding = options.encoding || 'utf8';
+    this.highWaterMark = options.highWaterMark || 16 * 1024;
+    this.start = options.start || 0;
+    this.fd = null;
+
+    this.cache = [];// 缓存多次写入的数据。源码使用链表
+    this.len = 0; // 维护写入的长度 len
+    this.needDrain = false; // 是否触发drain事件
+    this.writing = false; // 如果正在写入就放入缓存中
+    this.pos = this.start; // 写入非位置
+
+    this.open()
+  }
+  open() {
+    fs.open(this.path, this.flag, (err, fd) => {
+      if (err) {
+        return this.emit('error');
+      }
+      this.fd = fd;
+      this.emit('open');
+    })
+  }
+
+  write(chunk, encoding = this.encoding, callback = () => { }) {
+    // 第一次是真正的向文件中写入，之后都放在内存中了
+    // 判断是不是buffer，如果不是buffer就需要转成buffer，在重新赋值。把传入的内容统一转换成buffer
+    chunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
+    this.len += chunk.length; // 修改长度
+    if (this.len >= this.highWaterMark) { // 清空后需要触发drain事件
+      this.needDrain = true;
+    }
+
+    // write方法要有一个返回结果
+    if (this.writing) {
+      this.cache.push({ // 把当前写的存入缓存区
+        chunk, // 内容
+        encoding, // 编码
+        callback
+      })
+      // 第一次写完怎么知道写第二个？
+    } else {
+      // 如果没有写入，则把状态修改为正在写入，并开始写
+      this.writing = true; // 正在写入
+      this._write(chunk, encoding, () => {
+        callback(); // 回调
+        this.clearBuffer(); // 清理数组的第一项
+      }); // 开始写入
+    }
+    return !this.needDrain; // this.len < this.highWaterMark
+  }
+  clearBuffer() {
+    let obj = this.cache.shift();
+    if (obj) {
+      this._write(obj.chunk, obj.encoding, () => {
+        // 当自己写入成功后，继续清空缓存，直到缓存区为空
+        obj.callback();
+        this.clearBuffer();
+      })
+    } else { // 缓存已经干了
+      if (this.needDrain) { // 需要触发drain
+        this.needDrain = false;
+        this.writing = false; // 不是正在写入，下次写入时，依然是第一个往文件里写，剩下的向缓存中写入
+        this.emit('drain')
+      }
+    }
+  }
+
+  _write(chunk, encoding, callback) {
+    if (typeof this.fd !== 'number') {
+      return this.once('open', () => this._write(chunk, encoding, callback));
+    }
+    // 写入时可以不用加pos
+    fs.write(this.fd, chunk, 0, chunk.length, this.pos, (err, written) => {
+      this.pos += written;
+      this.len -= written; // 每次写入成功后，都需要把缓存的大小减少
+      callback();// 当写入成功后，调用callback，会执行clearBuffer方法
+    })
+  }
+
+}
+module.exports = WriteStream
+```
+:::   
+::: tab name.txt
+```txt
+123456789
+```
+:::   
+::::
+
