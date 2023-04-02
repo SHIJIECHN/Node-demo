@@ -6,7 +6,7 @@
   "configurations": [
     {
       "name": "Launch Program",
-      "program": "${workspaceFolder}/6.require-demo.js",
+      "program": "${workspaceFolder}/12.events",
       "request": "launch",
       "skipFiles": [
         // "<node_internals>/**"
