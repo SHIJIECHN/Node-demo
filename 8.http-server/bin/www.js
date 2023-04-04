@@ -33,8 +33,6 @@ let serverOptions = Object.assign(defaultMapping, userArgs);
 
 // 启动服务
 const Server = require('../src/index.js');
-console.log('========================')
-console.log(serverOptions)
 let server = new Server(serverOptions);
 server.start();
 

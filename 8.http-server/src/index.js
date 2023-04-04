@@ -6,6 +6,7 @@ const fs = require('fs').promises; // 将fs中所有的方法变成promise
 const mime = require('mime');// 通过文件返回文件类型
 const { createReadStream, readFileSync } = require('fs');
 const ejs = require('ejs'); // 解析模板
+const zlib = require('zlib'); // 压缩
 
 const template = readFileSync(path.resolve(__dirname, 'template.html'), 'utf8');
 
@@ -41,17 +42,48 @@ class Server {
         res.end(fileContent);
       } else {
         // 文件。读取文件内容并返回
-        this.sendFile(req, res, requestFile);
+        this.sendFile(req, res, requestFile, statObj);
       }
     } catch (e) {
       this.sendError(req, res, e);
     }
   }
 
-  sendFile(req, res, requestFile) {
+  cacheFile() {
+
+  }
+
+  gzipFile(req, res, requestFile, statObj) { // 浏览器会给我一个accept-encoding的字段，我要看一下浏览器支持什么压缩
+    let encodings = req.headers['accept-encoding'];
+    console.log(encodings)
+    if (encodings) { // 浏览器支持
+      if (encodings.includes('gzip')) {
+        res.setHeader('Content-Encoding', 'gzip'); // 浏览器要知道服务器的压缩类型
+        return zlib.createGzip();
+      } else if (encodings.includes('deflate')) {
+        res.setHeader('Content-Encoding', 'deflate');
+        return zlib.createDeflate();
+      }
+    }
+    return false;// 浏览器不支持压缩
+  }
+
+  sendFile(req, res, requestFile, statObj) {
+    // 读取文件的时候判断是否有缓存，如果有缓存则直接从缓存中读取并返回
+    // if (this.cacheFile()) {
+
+    // }
+
     // 我们返回文件，需要给浏览器提供内容类型和内容的编码格式
     res.setHeader('Content-Type', mime.getType(requestFile) + ';charset=utf-8');
     // 需要将文件读取出来并且返回
+    // createReadStream(requestFile).pipe(res);
+
+    let createGzip = this.gzipFile(req, res, requestFile, statObj);
+    if (createGzip) { // 看一下支不支持压缩，如果支持，就返回一个压缩流
+      return createReadStream(requestFile).pipe(createGzip).pipe(res); // 转化流
+    }
+
     createReadStream(requestFile).pipe(res);
   }
 

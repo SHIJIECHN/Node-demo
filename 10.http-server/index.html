@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
+
+<body>
+  <button id="btn">点击</button>
+
+  <script>
+    const btn = document.getElementById('btn');
+    btn.addEventListener('click', () => {
+      const xhr = new XMLHttpRequest();
+      // 服务器本身不支持 ../../路径 
+      xhr.open('POST', '/login', true); // / 服务器根路径，以服务器localhost:3000
+      xhr.setRequestHeader('Content-Type', 'application/json;charset=utf-8');
+      xhr.onload = function () {
+        // 浏览器会根据服务器返回的类型进行解析
+        console.log(xhr.response)
+      }
+
+      xhr.send("{'name':'zf'}")
+    });
+  </script>
+</body>
+
+</html>
