@@ -1,8 +1,8 @@
 {
-  "name": "10.http-server",
+  "name": "11.Koa",
   "version": "1.0.0",
   "description": "",
-  "main": "1.server.js",
+  "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -10,7 +10,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "mime": "^3.0.0",
-    "uuid": "^9.0.0"
+    "koa": "^2.13.1",
+    "koa-bodyparser": "^4.3.0",
+    "koa-router": "^10.0.0",
+    "koa-static": "^5.0.0",
+    "mime": "^2.5.2"
   }
 }

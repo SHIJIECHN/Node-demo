@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document</title>
+</head>
+
+<body>
+  <button id="btn">点击</button>
+
+  <script>
+    const btn = document.getElementById('btn');
+    btn.addEventListener('click', () => {
+      const xhr = new XMLHttpRequest();
+      // 服务器本身不支持 ../../路径 。/ 服务器根路径，以服务器localhost:3000
+      xhr.open('POST', 'http://localhost:3000/login', true); 
+      xhr.setRequestHeader('token', '12345678')
+      // xhr.setRequestHeader('Content-Type', 'text/plain'); // 1）纯文本
+      // 客户端和服务器说我传递的数据类型的格式
+      xhr.setRequestHeader('Content-Type', 'application/json'); // 2)
+      xhr.responseType = 'json'; // 要求返回的是json
+      xhr.withCredentials = true; // 强制携带cookie
+      xhr.onload = function () {
+        // 浏览器会根据服务器返回的类型进行解析
+        console.log(xhr.response)
+      }
+
+      xhr.send('{"name":"zf"}'); // 2) json
+      // xhr.send('abc');// 1）纯文本类型
+
+    });
+
+    // ajax默认是同源策略，浏览器的限制。要求发送的域名、协议、接口都得是同一个
+
+  </script>
+</body>
+
+</html>
