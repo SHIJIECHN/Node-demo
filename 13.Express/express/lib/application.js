@@ -15,6 +15,13 @@ Application.prototype.lazy_route = function () {
   }
 }
 
+
+Application.prototype.param = function (key, handler) {
+  this.lazy_route();
+  this._router.param(key, handler);
+}
+
+
 Application.prototype.use = function (path, handler) {
   this.lazy_route(); // 有请求的时候再创建路由
   this._router.use(path, handler);

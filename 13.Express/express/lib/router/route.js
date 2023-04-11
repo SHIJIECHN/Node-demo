@@ -12,7 +12,8 @@ function Route() {
 Route.prototype.dispatch = function (req, res, out) {
   let idx = 0;
   let method = req.method.toLowerCase();// 获取请求的方法
-  let dispatch = () => {
+  let dispatch = (err) => {
+    if (err) return out(err);
     if (idx === this.stack.length) return out();
     let layer = this.stack[idx++];
     // 获取内部的第一层，看下是否方法匹配
@@ -21,7 +22,6 @@ Route.prototype.dispatch = function (req, res, out) {
     } else {
       dispatch();
     }
-
   }
   dispatch();
 }
